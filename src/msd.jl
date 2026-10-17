@@ -23,13 +23,32 @@ const MSDRadixSort = StableMSDRadixSortAlg(smallsort = Base.Sort.DEFAULT_UNSTABL
 _compose(::typeof(identity), ::typeof(identity)) = identity
 _compose(::typeof(identity), f) = f
 _compose(f, ::typeof(identity)) = f
-_compose(::typeof(-), ::typeof(-)) = identity  # OK?
 _compose(f, g) = f ∘ g
+
+"""
+    Rev(x)
+
+Key wrapper for reverse order: compares as `x` reversed, and its radix digits
+are the complements of those of `x` (with "padded", e.g. an ended string,
+sorting last instead of first). Unlike negation this works for unsigned
+integers and strings.
+"""
+struct Rev{T}
+    x::T
+end
+Base.isless(a::Rev, b::Rev) = isless(b.x, a.x)
+
+# `x -> Rev(f(x))` as a concrete callable: passing the type `Rev` itself as
+# `by` makes Julia skip specializing the inner loops on it (30× slower).
+struct RevBy{F}
+    f::F
+end
+@inline (r::RevBy)(x) = Rev(r.f(x))
 
 # TODO: reversing order should be done after the projection
 _ord_by(o) = error("unsupported ordering: $o")
 _ord_by(::ForwardOrdering) = identity
-_ord_by(::ReverseOrdering{ForwardOrdering}) = -  # TODO; fix it for strings
+_ord_by(o::ReverseOrdering) = RevBy(_ord_by(o.fwd))
 _ord_by(order::Order.By) = _compose(_ord_by(order.order), order.by)
 
 function Base.sort!(
@@ -270,10 +289,14 @@ function _countmsd!(counts, xs, by, ibyte)
         x2 = xs[i+1]
         x3 = xs[i+2]
         x4 = xs[i+3]
-        k1 = msd_at(by(x1), ibyte)
-        k2 = msd_at(by(x2), ibyte)
-        k3 = msd_at(by(x3), ibyte)
-        k4 = msd_at(by(x4), ibyte)
+        v1 = by(x1)
+        v2 = by(x2)
+        v3 = by(x3)
+        v4 = by(x4)
+        k1 = msd_at(v1, ibyte)
+        k2 = msd_at(v2, ibyte)
+        k3 = msd_at(v3, ibyte)
+        k4 = msd_at(v4, ibyte)
         if k1 !== nothing
             allpadded = false
         end
@@ -286,18 +309,19 @@ function _countmsd!(counts, xs, by, ibyte)
         if k4 !== nothing
             allpadded = false
         end
-        counts[something(k1, 1)] += 1
-        counts[something(k2, 1)] += 1
-        counts[something(k3, 1)] += 1
-        counts[something(k4, 1)] += 1
+        counts[something(k1, padbucket(v1))] += 1
+        counts[something(k2, padbucket(v2))] += 1
+        counts[something(k3, padbucket(v3))] += 1
+        counts[something(k4, padbucket(v4))] += 1
         i += 4
     end
     while i <= lastindex(xs)
-        k = msd_at(by(@inbounds xs[i]), ibyte)
+        v = by(@inbounds xs[i])
+        k = msd_at(v, ibyte)
         if k !== nothing
             allpadded = false
         end
-        @inbounds counts[something(k, 1)] += 1
+        @inbounds counts[something(k, padbucket(v))] += 1
         i += 1
     end
     return counts, allpadded
@@ -316,10 +340,10 @@ function _scatter!(ys, xs, idx, exclusive_offsets, by, ibyte)
         x2 = xs[i+1]
         x3 = xs[i+2]
         x4 = xs[i+3]
-        k1 = something(msd_at(by(x1), ibyte), 1)
-        k2 = something(msd_at(by(x2), ibyte), 1)
-        k3 = something(msd_at(by(x3), ibyte), 1)
-        k4 = something(msd_at(by(x4), ibyte), 1)
+        k1 = bucket(by(x1), ibyte)
+        k2 = bucket(by(x2), ibyte)
+        k3 = bucket(by(x3), ibyte)
+        k4 = bucket(by(x4), ibyte)
         j1 = offsets[k1] += 1
         j2 = offsets[k2] += 1
         j3 = offsets[k3] += 1
@@ -331,7 +355,7 @@ function _scatter!(ys, xs, idx, exclusive_offsets, by, ibyte)
         i += 4
     end
     while i <= last(idx)
-        j = offsets[something(msd_at(by(xs[i]), ibyte), 1)] += 1
+        j = offsets[bucket(by(xs[i]), ibyte)] += 1
         ys[j] = xs[i]
         i += 1
     end
@@ -407,6 +431,19 @@ function _spawn_foreach_remaining_subrange(
 end
 
 @inline msd_at(x, ibyte::Integer) = sizeof(x) < ibyte ? nothing : _msd_at(x, ibyte) + 1
+
+# Reverse order: complement the digit; padded stays `nothing` (see `padbucket`).
+@inline function msd_at(r::Rev, ibyte::Integer)
+    k = msd_at(r.x, ibyte)
+    return k === nothing ? nothing : 257 - k
+end
+
+# Bucket for keys that are padded (`msd_at` returns `nothing`) at a byte:
+# first in forward order, last in reverse order.
+@inline padbucket(_) = 1
+@inline padbucket(r::Rev) = 257 - padbucket(r.x)
+
+@inline bucket(v, ibyte) = something(msd_at(v, ibyte), padbucket(v))
 
 @inline _msd_at(x::Unsigned, ibyte::Integer) =
     if ibyte == sizeof(x)
