@@ -20,4 +20,14 @@ const ALGS = [
     @test sort(y; alg = alg, rev = true) == sort(y; rev = true)
 end
 
+# Strings compare byte-wise (memcmp), also when they are not valid UTF-8.
+@testset "invalid UTF-8 and malformed Chars: $alg" for alg in ALGS
+    bytes = UInt8[0x00, 0x61, 0x7f, 0x80, 0xa9, 0xbf, 0xc3, 0xe2, 0xf0, 0xff]
+    x = [String(rand(bytes, rand(0:6))) for _ in 1:2^16]
+    @test sort(x; alg = alg) == sort(x)
+    @test sort(x; alg = alg, rev = true) == sort(x; rev = true)
+    c = [first(String(rand(bytes, rand(1:4)))) for _ in 1:2^16]
+    @test isequal(sort(c; alg = alg), sort(c))
+end
+
 end  # module

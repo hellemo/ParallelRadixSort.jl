@@ -474,9 +474,24 @@ end
     return _msd_at(ifelse(isnan(x), typemax(UInt64), k), ibyte)
 end
 
+# `Char`s compare by their raw 32-bit representation (the UTF-8 bytes, most
+# significant first), which also exists for malformed characters in invalid
+# UTF-8, where `UInt32(c)` throws. For strings this keeps byte-wise order.
+@inline _msd_at(x::Char, ibyte::Integer) = _msd_at(reinterpret(UInt32, x), ibyte)
 @inline _msd_at(x::AbstractChar, ibyte::Integer) = _msd_at(UInt32(x), ibyte)
 
+# Strings with byte code units (`String`, `SubString{String}`, ...) compare
+# byte-wise, also when they are not valid UTF-8, so their digits are the
+# bytes themselves. (Digits taken per `Char` would pad a lone invalid byte
+# like '\xc3' with zeros and order it before the valid "\xc3\x80".)
 @inline function msd_at(x::AbstractString, ibyte::Integer)
+    codeunit(x) === UInt8 || return _msd_at_chars(x, ibyte)
+    i = Int(ibyte)
+    return i <= ncodeunits(x) ? Int(codeunit(x, i)::UInt8) + 2 : nothing
+end
+
+# Other strings: digits of their characters, four bytes per character.
+@inline function _msd_at_chars(x::AbstractString, ibyte::Integer)
     n, r = divrem(ibyte - 1, sizeof(eltype(x)))
     if ibyte isa StaticInteger
         c = _get(x, static(n + 1))
