@@ -73,7 +73,6 @@ function Base.sort!(
     return xs
 end
 
-# TODO: NaN ordering correctness
 # [patched for Julia ≥ 1.9] Base.Sort.Float.fpsort!(v::AbstractVector, a::RadixSortAlgorithm, o::Ordering) =
 #     sort!(v, firstindex(v), lastindex(v), a, o)
 
@@ -418,15 +417,18 @@ end
 
 # Taken from SortingAlgorithms.jl:
 @inline _msd_at(x::Signed, ibyte::Integer) = _msd_at(unsigned(xor(x, typemin(x))), ibyte)
+# `isless` places every NaN, of either sign and any payload, after +Inf, so all
+# NaNs get the largest key (negative-signed NaNs would otherwise sort first).
 @inline function _msd_at(x::Float32, ibyte::Integer)
     y = reinterpret(Int32, x)
-    return _msd_at(reinterpret(UInt32, ifelse(y < 0, ~y, xor(y, typemin(Int32)))), ibyte)
+    k = reinterpret(UInt32, ifelse(y < 0, ~y, xor(y, typemin(Int32))))
+    return _msd_at(ifelse(isnan(x), typemax(UInt32), k), ibyte)
 end
 @inline function _msd_at(x::Float64, ibyte::Integer)
     y = reinterpret(Int64, x)
-    return _msd_at(reinterpret(UInt64, ifelse(y < 0, ~y, xor(y, typemin(Int64)))), ibyte)
+    k = reinterpret(UInt64, ifelse(y < 0, ~y, xor(y, typemin(Int64))))
+    return _msd_at(ifelse(isnan(x), typemax(UInt64), k), ibyte)
 end
-# TODO: normalize NaN?
 
 @inline _msd_at(x::AbstractChar, ibyte::Integer) = _msd_at(UInt32(x), ibyte)
 
