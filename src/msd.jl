@@ -74,8 +74,8 @@ function Base.sort!(
 end
 
 # TODO: NaN ordering correctness
-Base.Sort.Float.fpsort!(v::AbstractVector, a::RadixSortAlgorithm, o::Ordering) =
-    sort!(v, firstindex(v), lastindex(v), a, o)
+# [patched for Julia ≥ 1.9] Base.Sort.Float.fpsort!(v::AbstractVector, a::RadixSortAlgorithm, o::Ordering) =
+#     sort!(v, firstindex(v), lastindex(v), a, o)
 
 # https://cs.stackexchange.com/a/96420
 # https://www.youtube.com/watch?v=zqs87a_7zxw
