@@ -285,10 +285,6 @@ function _countmsd!(counts, xs, by, ibyte)
     i = firstindex(xs)
     n = lastindex(xs) - 8
     @inbounds while i <= n
-        tryprefetch(xs[i+4], ibyte)
-        tryprefetch(xs[i+5], ibyte)
-        tryprefetch(xs[i+6], ibyte)
-        tryprefetch(xs[i+7], ibyte)
         x1 = xs[i]
         x2 = xs[i+1]
         x3 = xs[i+2]
@@ -336,10 +332,6 @@ function _scatter!(ys, xs, idx, exclusive_offsets, by, ibyte)
     i = first(idx)
     n = last(idx) - 8
     @inbounds while i <= n
-        tryprefetch(xs[i+4], ibyte)
-        tryprefetch(xs[i+5], ibyte)
-        tryprefetch(xs[i+6], ibyte)
-        tryprefetch(xs[i+7], ibyte)
         x1 = xs[i]
         x2 = xs[i+1]
         x3 = xs[i+2]
