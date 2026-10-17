@@ -2,6 +2,10 @@ _default_basesize(n::Integer) = max(1, cld(n, Threads.nthreads()))
 default_basesize(xs) = _default_basesize(length(xs))
 const DEFAULT_SMALLSIZE = 64
 
+# Buckets per byte: one for padded keys (e.g. strings that have ended) plus
+# one per byte value, so that a padded key never shares a bucket with byte 0.
+const NBUCKETS = 257
+
 Base.@kwdef struct ParallelStableMSDRadixSortAlg{Alg,BaseSize} <: RadixSortAlgorithm
     smallsort::Alg = Base.Sort.DEFAULT_STABLE
     smallsize::Int = DEFAULT_SMALLSIZE
@@ -29,8 +33,8 @@ _compose(f, g) = f ∘ g
     Rev(x)
 
 Key wrapper for reverse order: compares as `x` reversed, and its radix digits
-are the complements of those of `x` (with "padded", e.g. an ended string,
-sorting last instead of first). Unlike negation this works for unsigned
+are mirrored (with "padded", e.g. an ended string, sorting last instead of
+first). Unlike negation this works for unsigned
 integers and strings.
 """
 struct Rev{T}
@@ -141,7 +145,7 @@ function _stablemsd!(
 
     # TODO: parallel prefix
     # exclusive scan
-    foldl(Iterators.product(alloffsets, 1:256); init = 0) do acc, (offsets, i)
+    foldl(Iterators.product(alloffsets, 1:NBUCKETS); init = 0) do acc, (offsets, i)
         @inbounds (acc, offsets[i]) = (acc + offsets[i], acc)
         return acc
     end
@@ -187,7 +191,7 @@ function _stablemsd_seq!(
     smallsize,
     smallsort::SORT,
     xs_mutable::Union{Val{true},Val{false}} = Val(false),
-    bufs = [zeros(Int, 256)],
+    bufs = [zeros(Int, NBUCKETS)],
     ibuf = 1,
 ) where {BY,SORT}
 
@@ -208,7 +212,7 @@ function _stablemsd_seq!(
     will_be_allpadded(eltype(xs), by, @stat(ibyte + 1)) && return ys
 
     if ibuf + 1 > length(bufs)
-        push!(bufs, zeros(Int, 256))
+        push!(bufs, zeros(Int, NBUCKETS))
     end
     _foreach_remaining_subrange(offsets) do idx
         ys_chunk = view(ys, idx)
@@ -271,7 +275,7 @@ end
     return T === Nothing
 end
 
-zerocounts() = zeros(MVector{256,Int})
+zerocounts() = zeros(MVector{NBUCKETS,Int})
 
 """
     _countmsd!(counts, xs, by, ibyte) -> (counts, allpadded::Bool)
@@ -430,18 +434,21 @@ function _spawn_foreach_remaining_subrange(
     return
 end
 
-@inline msd_at(x, ibyte::Integer) = sizeof(x) < ibyte ? nothing : _msd_at(x, ibyte) + 1
+# Bucket 1 is reserved for padded keys; byte value b goes to bucket b + 2.
+@inline msd_at(x, ibyte::Integer) = sizeof(x) < ibyte ? nothing : _msd_at(x, ibyte) + 2
 
-# Reverse order: complement the digit; padded stays `nothing` (see `padbucket`).
+# Reverse order mirrors the buckets: bytes go to 256 - b (1:256) and padded
+# keys to 257, i.e. bucket k ↦ 258 - k. Padded stays `nothing` here (see
+# `padbucket`) so that "all padded" can still be detected.
 @inline function msd_at(r::Rev, ibyte::Integer)
     k = msd_at(r.x, ibyte)
-    return k === nothing ? nothing : 257 - k
+    return k === nothing ? nothing : 258 - k
 end
 
 # Bucket for keys that are padded (`msd_at` returns `nothing`) at a byte:
 # first in forward order, last in reverse order.
 @inline padbucket(_) = 1
-@inline padbucket(r::Rev) = 257 - padbucket(r.x)
+@inline padbucket(r::Rev) = 258 - padbucket(r.x)
 
 @inline bucket(v, ibyte) = something(msd_at(v, ibyte), padbucket(v))
 
