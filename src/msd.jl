@@ -104,7 +104,10 @@ function _stablemsd!(
     chunksize = max(basesize, cld(length(xs), Threads.nthreads()))
 
     chunks = Iterators.partition(xs, chunksize)
-    allcounts = alloc!(COUNTS_POOL, length(chunks))
+    # One counts vector per chunk, allocated per call: a pool indexed by
+    # `Threads.threadid()` is unsafe once tasks can migrate between threads
+    # and breaks when thread ids exceed `nthreads()` (interactive threads).
+    allcounts = [zerocounts() for _ in 1:length(chunks)]
     allpaddeds = Vector{Bool}(undef, length(chunks))
     let allcounts = allcounts
         @sync for (i, xs) in enumerate(chunks)
@@ -131,7 +134,6 @@ function _stablemsd!(
     end
     @DBG @check vec(reduce(hcat, alloffsets)') == cumsum(vec(reduce(hcat, allcounts)'))
 
-    free!(COUNTS_POOL, @view alloffsets[1:end-1])
     _spawn_foreach_remaining_subrange(alloffsets[end], basesize) do idx
         ys_chunk = view(ys, idx)
         if length(idx) <= smallsize
@@ -155,7 +157,6 @@ function _stablemsd!(
         end
         return
     end
-    free!(COUNTS_POOL, @view alloffsets[end:end])
 
     return ys
 end
@@ -253,11 +254,6 @@ end
 end
 
 zerocounts() = zeros(MVector{256,Int})
-const COUNTS_POOL = Pool(zerocounts)
-module _CountsPoolInitializer
-function __init__ end
-end
-_CountsPoolInitializer.__init__() = initpool!(COUNTS_POOL)
 
 """
     _countmsd!(counts, xs, by, ibyte) -> (counts, allpadded::Bool)

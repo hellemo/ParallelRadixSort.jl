@@ -18,7 +18,6 @@ abstract type RadixSortAlgorithm <: Base.Sort.Algorithm end
 (alg::RadixSortAlgorithm)(; kw...) = setproperties(alg; kw...)
 
 include("utils.jl")
-include("pool.jl")
 include("msd.jl")
 
 end # module
